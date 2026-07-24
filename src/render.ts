@@ -376,45 +376,58 @@ export function updateFooterStatus(ctx: UsageContext, snapshot: UsageSnapshot): 
 		parts.push(`${dim(`${label}${limited ? " limited" : ""}:`)}${summary}`);
 	};
 
-	if (codexUsageHasData(codex)) {
-		const limited = codex.rateLimited;
-		const quotaParts = footerQuotaParts(theme, [
-			{ usedPercent: codex.primaryUsedPercent, resetAt: codex.primaryResetAt, resetAfterSeconds: codex.primaryResetAfterSeconds },
-			{ usedPercent: codex.secondaryUsedPercent, resetAt: codex.secondaryResetAt, resetAfterSeconds: codex.secondaryResetAfterSeconds },
-		]);
-		const retryDuration = resetDuration(codex.primaryResetAt, codex.primaryResetAfterSeconds);
-		if (limited && codex.primaryUsedPercent === undefined && retryDuration) {
-			quotaParts.unshift(theme.fg("warning", `⏳/${retryDuration}`));
-		}
-		const fallback = limited ? "⏳" : "✓";
-		const summary = quotaParts.length > 0
-			? quotaParts.join(dim(","))
-			: theme.fg(limited ? "warning" : "dim", fallback);
-		addPart("Codex", limited, summary);
-	}
-	if (usageHasData(anthropic)) {
-		addPart("Claude", anthropic.status === "rate_limited", footerSummary(theme, [
-			{ usedPercent: anthropic.fiveHour?.utilizationPercent, resetAt: anthropic.fiveHour?.resetAt, resetAfterSeconds: anthropic.fiveHour?.resetAfterSeconds },
-			{ usedPercent: anthropic.weekly?.utilizationPercent, resetAt: anthropic.weekly?.resetAt, resetAfterSeconds: anthropic.weekly?.resetAfterSeconds },
-		], anthropic.status, anthropic.retryAfterSeconds, anthropic.retryResetAt));
-	}
-	if (usageHasData(copilot)) {
-		addPart("Copilot", copilot.status === "rate_limited" || copilot.status === "credits_error", footerSummary(theme, [
-			{ ...copilot.premiumRequests, suffix: "p" },
-			{ ...copilot.requests, suffix: "r" },
-		], copilot.status, copilot.retryAfterSeconds, copilot.retryResetAt));
-	}
-	for (const subscription of [go, ...subscriptions]) {
-		if (!usageHasData(subscription)) continue;
+	if (go && usageHasData(go) && ctx.model?.provider === "opencode-go") {
+		// OpenCode Go provider active — show only Go in footer.
 		addPart(
-			subscription.shortLabel,
-			subscription.status === "rate_limited" || subscription.status === "credits_error",
+			go.shortLabel,
+			go.status === "rate_limited" || go.status === "credits_error",
 			footerSummary(theme, [
-				{ ...subscription.rolling, suffix: "r" },
-				{ ...subscription.weekly, suffix: "w" },
-				{ ...subscription.monthly, suffix: "m" },
-			], subscription.status, subscription.retryAfterSeconds, subscription.retryResetAt),
+				{ ...go.rolling, suffix: "r" },
+				{ ...go.weekly, suffix: "w" },
+				{ ...go.monthly, suffix: "m" },
+			], go.status, go.retryAfterSeconds, go.retryResetAt),
 		);
+	} else {
+		if (codexUsageHasData(codex)) {
+			const limited = codex.rateLimited;
+			const quotaParts = footerQuotaParts(theme, [
+				{ usedPercent: codex.primaryUsedPercent, resetAt: codex.primaryResetAt, resetAfterSeconds: codex.primaryResetAfterSeconds },
+				{ usedPercent: codex.secondaryUsedPercent, resetAt: codex.secondaryResetAt, resetAfterSeconds: codex.secondaryResetAfterSeconds },
+			]);
+			const retryDuration = resetDuration(codex.primaryResetAt, codex.primaryResetAfterSeconds);
+			if (limited && codex.primaryUsedPercent === undefined && retryDuration) {
+				quotaParts.unshift(theme.fg("warning", `⏳/${retryDuration}`));
+			}
+			const fallback = limited ? "⏳" : "✓";
+			const summary = quotaParts.length > 0
+				? quotaParts.join(dim(","))
+				: theme.fg(limited ? "warning" : "dim", fallback);
+			addPart("Codex", limited, summary);
+		}
+		if (usageHasData(anthropic)) {
+			addPart("Claude", anthropic.status === "rate_limited", footerSummary(theme, [
+				{ usedPercent: anthropic.fiveHour?.utilizationPercent, resetAt: anthropic.fiveHour?.resetAt, resetAfterSeconds: anthropic.fiveHour?.resetAfterSeconds },
+				{ usedPercent: anthropic.weekly?.utilizationPercent, resetAt: anthropic.weekly?.resetAt, resetAfterSeconds: anthropic.weekly?.resetAfterSeconds },
+			], anthropic.status, anthropic.retryAfterSeconds, anthropic.retryResetAt));
+		}
+		if (usageHasData(copilot)) {
+			addPart("Copilot", copilot.status === "rate_limited" || copilot.status === "credits_error", footerSummary(theme, [
+				{ ...copilot.premiumRequests, suffix: "p" },
+				{ ...copilot.requests, suffix: "r" },
+			], copilot.status, copilot.retryAfterSeconds, copilot.retryResetAt));
+		}
+		for (const subscription of subscriptions) {
+			if (!usageHasData(subscription)) continue;
+			addPart(
+				subscription.shortLabel,
+				subscription.status === "rate_limited" || subscription.status === "credits_error",
+				footerSummary(theme, [
+					{ ...subscription.rolling, suffix: "r" },
+					{ ...subscription.weekly, suffix: "w" },
+					{ ...subscription.monthly, suffix: "m" },
+				], subscription.status, subscription.retryAfterSeconds, subscription.retryResetAt),
+			);
+		}
 	}
 
 	if (parts.length > 0) {

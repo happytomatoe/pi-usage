@@ -7,6 +7,9 @@
  *
  * Also provides `/usage` command to refresh on demand.
  *
+ * When using the opencode-go provider, only OpenCode Go usage is shown
+ * in the footer (e.g., Go:0%r/4.8h,27%w/2.3d,13%m/29.8d).
+ *
  * Setup:
  *   Codex:        Uses OAuth token from pi's auth.json (same as openai-codex provider)
  *   Anthropic:    Uses OAuth token/API key from pi's auth.json or env
@@ -371,98 +374,109 @@ export default function (pi: ExtensionAPI) {
 			const selected = ctx.model;
 			const preferredFor = (provider: string) => selected?.provider === provider ? selected : undefined;
 
-			// Check Codex; activity scheduler or recent passive headers defer auto probes.
-			const skipCodexCheck = trigger === "auto"
-				&& (CODEX_RESPONSE_REFRESH_ENABLED || passiveUpdateIsFresh(OPENAI_CODEX_PROVIDER) || recentCodexUsageRequest());
-			const codexAuth = skipCodexCheck ? undefined : await getCodexToken();
-			if (codexAuth) {
-				codexUsageRequestAt = Date.now();
-				codexResponseCleanTicks = 0;
-				runCheck(
-					OPENAI_CODEX_PROVIDER,
-					checkCodexUsage(codexAuth.token, codexAuth.accountId, signal),
-					() => codexUsage,
-					CODEX_REFRESH_FIELDS,
-					(result) => { codexUsage = normalizeCodexResetTimes(result); },
-					codexRefreshIsAuthoritative,
-				);
-			}
-
-			// Check Anthropic Claude Pro/Max; recent passive headers defer auto probes.
-			const skipAnthropicCheck = trigger === "auto" && passiveUpdateIsFresh(ANTHROPIC_PROVIDER);
-			const anthropicAuth = skipAnthropicCheck ? undefined : await getAnthropicAuth();
-			if (anthropicAuth) {
-				runCheck(
-					ANTHROPIC_PROVIDER,
-					checkAnthropicUsage(anthropicAuth, signal, selected),
-					() => anthropicUsage,
-					ANTHROPIC_REFRESH_FIELDS,
-					(result) => { anthropicUsage = normalizeAnthropicResetTimes(result); },
-					probeRefreshIsAuthoritative,
-				);
-			} else if (!skipAnthropicCheck) {
-				anthropicUsage = undefined;
-			}
-
-			// Check GitHub Copilot; recent passive headers defer auto probes.
-			const skipCopilotCheck = trigger === "auto" && passiveUpdateIsFresh(GITHUB_COPILOT_PROVIDER);
-			const copilotAuth = skipCopilotCheck ? undefined : await getCopilotAuth();
-			if (copilotAuth) {
-				runCheck(
-					GITHUB_COPILOT_PROVIDER,
-					checkCopilotUsage(copilotAuth, signal, selected),
-					() => copilotUsage,
-					COPILOT_REFRESH_FIELDS,
-					(result) => { copilotUsage = normalizeCopilotResetTimes(result); },
-					probeRefreshIsAuthoritative,
-				);
-			} else if (!skipCopilotCheck) {
-				copilotUsage = undefined;
-			}
-
-			// Check OpenCode Go; passive model headers can defer probes, but dashboard quota still needs proactive fetches.
+			// Check OpenCode Go first; skip other providers when Go is configured.
 			const goQuotaState = getOpenCodeGoQuotaConfig();
 			const skipGoCheck = trigger === "auto"
 				&& passiveUpdateIsFresh(OPENCODE_GO_PROVIDER)
 				&& (!goQuotaState.config || goQuotaUpdateIsFresh())
 				&& !goQuotaState.error;
 			const goKey = skipGoCheck ? undefined : getOpenCodeApiKey();
-			if (!skipGoCheck && (goKey || goQuotaState.config || goQuotaState.error)) {
-				runCheck(
-					OPENCODE_GO_PROVIDER,
-					checkOpenCodeGoUsage(goKey, goQuotaState, signal, preferredFor(OPENCODE_GO_PROVIDER)),
-					() => goUsage,
-					GO_REFRESH_FIELDS,
-					(result) => { goUsage = normalizeSubscriptionResetTimes(result); },
-					probeRefreshIsAuthoritative,
-					reconcileOpenCodeGoRefresh,
-				);
-			} else if (!skipGoCheck) {
-				goUsage = undefined;
-			}
+			const goConfigured = Boolean(goKey || goQuotaState.config || goQuotaState.error);
 
-			// Check other OpenAI/Anthropic-compatible subscription providers.
-			for (const providerConfig of SUBSCRIPTION_PROVIDERS) {
-				if (trigger === "auto" && passiveUpdateIsFresh(providerConfig.provider)) continue;
-				const apiKey = getSubscriptionApiKey(providerConfig);
-				if (!apiKey) {
-					subscriptionUsages.delete(providerConfig.provider);
-					continue;
-				}
-				runCheck(
-					providerConfig.provider,
-					checkSubscriptionProviderUsage(providerConfig, apiKey, signal, preferredFor(providerConfig.provider)),
-					() => subscriptionUsages.get(providerConfig.provider),
-					SUBSCRIPTION_REFRESH_FIELDS,
-					(result) => {
-						if (result.status === "no_key") {
-							subscriptionUsages.delete(providerConfig.provider);
-						} else {
-							subscriptionUsages.set(providerConfig.provider, normalizeSubscriptionResetTimes(result));
-						}
-					},
-					probeRefreshIsAuthoritative,
+			if (goConfigured) {
+				// OpenCode Go is configured — check only Go, skip other providers.
+				if (!skipGoCheck) {
+					runCheck(
+						OPENCODE_GO_PROVIDER,
+						checkOpenCodeGoUsage(goKey, goQuotaState, signal, preferredFor(OPENCODE_GO_PROVIDER)),
+						() => goUsage,
+						GO_REFRESH_FIELDS,
+						(result) => { goUsage = normalizeSubscriptionResetTimes(result); },
+						probeRefreshIsAuthoritative,
+						reconcileOpenCodeGoRefresh,
 				);
+				}
+
+				// Clear other providers when Go is active.
+				codexUsage = undefined;
+				anthropicUsage = undefined;
+				copilotUsage = undefined;
+				subscriptionUsages.clear();
+			} else {
+				// OpenCode Go not configured — check other providers as before.
+
+				// Check Codex; activity scheduler or recent passive headers defer auto probes.
+				const skipCodexCheck = trigger === "auto"
+					&& (CODEX_RESPONSE_REFRESH_ENABLED || passiveUpdateIsFresh(OPENAI_CODEX_PROVIDER) || recentCodexUsageRequest());
+				const codexAuth = skipCodexCheck ? undefined : await getCodexToken();
+				if (codexAuth) {
+					codexUsageRequestAt = Date.now();
+					codexResponseCleanTicks = 0;
+					runCheck(
+						OPENAI_CODEX_PROVIDER,
+						checkCodexUsage(codexAuth.token, codexAuth.accountId, signal),
+						() => codexUsage,
+						CODEX_REFRESH_FIELDS,
+						(result) => { codexUsage = normalizeCodexResetTimes(result); },
+						codexRefreshIsAuthoritative,
+				);
+				}
+
+				// Check Anthropic Claude Pro/Max; recent passive headers defer auto probes.
+				const skipAnthropicCheck = trigger === "auto" && passiveUpdateIsFresh(ANTHROPIC_PROVIDER);
+				const anthropicAuth = skipAnthropicCheck ? undefined : await getAnthropicAuth();
+				if (anthropicAuth) {
+					runCheck(
+						ANTHROPIC_PROVIDER,
+						checkAnthropicUsage(anthropicAuth, signal, selected),
+						() => anthropicUsage,
+						ANTHROPIC_REFRESH_FIELDS,
+						(result) => { anthropicUsage = normalizeAnthropicResetTimes(result); },
+						probeRefreshIsAuthoritative,
+				);
+				} else if (!skipAnthropicCheck) {
+					anthropicUsage = undefined;
+				}
+
+				// Check GitHub Copilot; recent passive headers defer auto probes.
+				const skipCopilotCheck = trigger === "auto" && passiveUpdateIsFresh(GITHUB_COPILOT_PROVIDER);
+				const copilotAuth = skipCopilotCheck ? undefined : await getCopilotAuth();
+				if (copilotAuth) {
+					runCheck(
+						GITHUB_COPILOT_PROVIDER,
+						checkCopilotUsage(copilotAuth, signal, selected),
+						() => copilotUsage,
+						COPILOT_REFRESH_FIELDS,
+						(result) => { copilotUsage = normalizeCopilotResetTimes(result); },
+						probeRefreshIsAuthoritative,
+				);
+				} else if (!skipCopilotCheck) {
+					copilotUsage = undefined;
+				}
+
+				// Check other OpenAI/Anthropic-compatible subscription providers.
+				for (const providerConfig of SUBSCRIPTION_PROVIDERS) {
+					if (trigger === "auto" && passiveUpdateIsFresh(providerConfig.provider)) continue;
+					const apiKey = getSubscriptionApiKey(providerConfig);
+					if (!apiKey) {
+						subscriptionUsages.delete(providerConfig.provider);
+						continue;
+					}
+					runCheck(
+						providerConfig.provider,
+						checkSubscriptionProviderUsage(providerConfig, apiKey, signal, preferredFor(providerConfig.provider)),
+						() => subscriptionUsages.get(providerConfig.provider),
+						SUBSCRIPTION_REFRESH_FIELDS,
+						(result) => {
+							if (result.status === "no_key") {
+								subscriptionUsages.delete(providerConfig.provider);
+							} else {
+								subscriptionUsages.set(providerConfig.provider, normalizeSubscriptionResetTimes(result));
+							}
+						},
+						probeRefreshIsAuthoritative,
+				);
+				}
 			}
 
 			await Promise.allSettled(checks);

@@ -263,6 +263,8 @@ Footer status is compact, for example:
 ⚡ Codex:17%/4.9h,42%/3.8d │ Claude:36%/2h,3%/6.1d │ Copilot:10%r/1h │ Go:20%r/3.2h,40%w/4.8d,60%m/12.4d │ Zen:✓
 ```
 
+**Note:** When using the `opencode-go` provider, only OpenCode Go usage is shown in the footer (e.g., `Go:0%r/4.8h,27%w/2.3d,13%m/29.8d`). Other providers are hidden to avoid clutter.
+
 Claude footer chunks are the 5-hour then weekly window (no suffix, like Codex). Copilot footer suffixes are `p` (premium requests) and `r` (generic requests). OpenCode Go and compatible-provider footer suffixes are `r` (rolling), `w` (week), and `m` (month). Widget progress bars and percentages turn **yellow** (>70%) or **red** (>90%). Footer chunks use: dim (`0–50%`), accent (`51–80%`), warning (`81–99%`), error (`100%`).
 
 ## How It Works
